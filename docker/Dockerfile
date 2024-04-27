@@ -1,4 +1,33 @@
 # syntax=docker/dockerfile:1
+FROM alpine:3.19 as builder
+
+WORKDIR /workdir
+
+ARG RUST_PYTHON_VERSION="0.3.1"
+ARG BUILD_DATE
+ARG VCS_REF
+
+ENV CARGO_HOME="/workdir"
+ENV CARGO_INSTALL_ROOT="/workdir"
+# armv6 and armv7 fix
+# See: https://github.com/rust-lang/cargo/issues/6513#issuecomment-1440029221
+ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
+
+ADD https://github.com/RustPython/RustPython/archive/refs/tags/$RUST_PYTHON_VERSION.tar.gz /tmp/v$RUST_PYTHON_VERSION.tar.gz
+
+RUN tar --strip-components=1 -C /workdir -xzf /tmp/v$RUST_PYTHON_VERSION.tar.gz
+
+# Remove the git mode that triggers an error on armv6 and armv7
+# Ref: https://github.com/rust-lang/cargo/issues/2808 (failed to mmap. Could not write data: Out of memory; class=Os (2))
+RUN sed -i 's#{ git = .*#{ path = "/workdir/rp__doc__/" }#' /workdir/derive-impl/Cargo.toml
+
+RUN apk add --no-cache rust cargo musl-dev git
+
+RUN cargo fetch
+
+RUN cargo build --features freeze-stdlib --release --locked --offline --bin rustpython
+
+
 FROM alpine:3.19
 
 ARG VERSION="1.2.6.7"
@@ -17,8 +46,7 @@ ARG group=deploy
 ENV CONTAINER_SERVICE_DIR="/container/service"
 ENV FIRST_START_DONE="/container/first-start-done"
 
-COPY --from=botsudo/docker-rustpython:latest /usr/local/bin/rustpython /usr/local/bin/rustpython
-COPY --from=botsudo/docker-rustpython:latest /usr/local/share/sbom/rustpython.spdx.json /usr/local/share/sbom/rustpython.spdx.json
+COPY --from=builder /workdir/target/release/rustpython /usr/local/bin/rustpython
 
 RUN apk add --no-cache --update nginx curl bash musl patch \
     openssl libgcc \
@@ -49,10 +77,12 @@ COPY log-helper /usr/local/sbin/
 COPY pythontojson.py /usr/local/sbin/
 COPY --chown=deploy:deploy horust/ /etc/horust/
 COPY nginx-default.conf /etc/nginx/http.d/default.conf
-COPY nginx.conf /etc/nginx/nginx.conf
+COPY nginx.conf /etc/nginx/nginx.
+
 COPY php-fpm-www-pool.conf /etc/php${PHP_VERSION_MAJOR}${PHP_VERSION_MINOR}/php-fpm.d/www.conf
 COPY --chown=deploy:deploy config.php ${CONTAINER_SERVICE_DIR}/phpldapadmin/assets/config/config.php
 
+RUN update-ca-certificates
 
 # Switch to user
 USER deploy:deploy
@@ -60,7 +90,7 @@ USER deploy:deploy
 RUN curl -# -L -o phpldapadmin.tar.gz ${DIST_URL} && \
     tar -xzf phpldapadmin.tar.gz -C /var/www/phpldapadmin --strip-components=1 && \
     rm phpldapadmin.tar.gz && \
-    wget https://sources.debian.org/data/main/p/phpldapadmin/1.2.6.6-2/debian/patches/Fix-dynamic-property-PHP-8.2.patch && \
+    wget https://sources.debian.org/data/main/p/phpldapadmin/1.2.6.7-1/debian/patches/Fix-dynamic-property-PHP-8.2.patch && \
     patch -p 1 -f < ./Fix-dynamic-property-PHP-8.2.patch && \
     printf "RELEASE-${VERSION}" > ./VERSION && \
     rm -vr ./doc/ ./.gitignore ./*.md
@@ -106,31 +136,7 @@ COPY <<-EOT /usr/local/share/sbom/phpldapadmin.spdx.json
 EOT
 
 # Metadata
-LABEL org.label-schema.vendor="Sudo-Bot" \
-    org.label-schema.url="https://github.com/sudo-bot/docker-phpldapadmin#readme" \
-    org.label-schema.name="docker-phpldapadmin" \
-    org.label-schema.description="A phpLDAPadmin image" \
-    org.label-schema.version=${VERSION} \
-    org.label-schema.vcs-url="https://github.com/sudo-bot/docker-phpldapadmin.git" \
-    org.label-schema.vcs-ref=${VCS_REF} \
-    org.label-schema.build-date=${BUILD_DATE} \
-    org.label-schema.docker.schema-version="1.0" \
-    \
-    com.docker.extension.publisher-url="https://github.com/sudo-bot" \
-    \
-    org.opencontainers.image.title="Docker phpLDAPadmin server" \
-    org.opencontainers.image.description="A phpLDAPadmin image" \
-    org.opencontainers.image.authors="williamdes@wdes.fr" \
-    org.opencontainers.image.url="https://github.com/sudo-bot/docker-phpldapadmin#readme" \
-    org.opencontainers.image.documentation="https://github.com/sudo-bot/docker-phpldapadmin#readme" \
-    org.opencontainers.image.source="https://github.com/sudo-bot/docker-phpldapadmin" \
-    org.opencontainers.image.vendor="Sudo-Bot" \
-    org.opencontainers.image.licenses="MPL-2.0" \
-    org.opencontainers.image.created=${BUILD_DATE} \
-    org.opencontainers.image.version=${VERSION} \
-    org.opencontainers.image.revision=${VCS_REF} \
-    org.opencontainers.image.ref.name="${VERSION}"
 
 EXPOSE 80
-
+EXPOSE 443
 ENTRYPOINT ["/docker-entrypoint.sh"]
