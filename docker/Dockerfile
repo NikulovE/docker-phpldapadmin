@@ -72,18 +72,16 @@ RUN apk add --no-cache --update nginx curl bash musl patch \
 
 WORKDIR /var/www/phpldapadmin
 
-COPY docker-entrypoint.sh /
-COPY log-helper /usr/local/sbin/
-COPY pythontojson.py /usr/local/sbin/
-COPY --chown=deploy:deploy horust/ /etc/horust/
-COPY nginx-default.conf /etc/nginx/http.d/default.conf
-COPY nginx.conf /etc/nginx/nginx.
+COPY ./Build/docker/sambadc-ui/docker-entrypoint.sh /
+COPY ./Build/docker/sambadc-ui/log-helper /usr/local/sbin/
+COPY ./Build/docker/sambadc-ui/pythontojson.py /usr/local/sbin/
+COPY --chown=deploy:deploy ./Build/docker/sambadc-ui/horust/ /etc/horust/
+COPY ./Build/docker/sambadc-ui/nginx-default.conf /etc/nginx/http.d/default.conf
+COPY ./Build/docker/sambadc-ui/nginx.conf /etc/nginx/nginx.
 
-COPY php-fpm-www-pool.conf /etc/php${PHP_VERSION_MAJOR}${PHP_VERSION_MINOR}/php-fpm.d/www.conf
-COPY --chown=deploy:deploy config.php ${CONTAINER_SERVICE_DIR}/phpldapadmin/assets/config/config.php
-
-RUN update-ca-certificates
-
+COPY ./Build/docker/sambadc-ui/php-fpm-www-pool.conf /etc/php${PHP_VERSION_MAJOR}${PHP_VERSION_MINOR}/php-fpm.d/www.conf
+COPY --chown=deploy:deploy ./Build/docker/sambadc-ui/config.php ${CONTAINER_SERVICE_DIR}/phpldapadmin/assets/config/config.php
+RUN chown -R deploy:deploy /etc/ssl/certs
 # Switch to user
 USER deploy:deploy
 
@@ -138,5 +136,5 @@ EOT
 # Metadata
 
 EXPOSE 80
-EXPOSE 443
+
 ENTRYPOINT ["/docker-entrypoint.sh"]
